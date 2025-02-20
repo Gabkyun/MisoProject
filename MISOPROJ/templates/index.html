@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMS Sender</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            text-align: center;
+            padding: 20px;
+        }
+        .container {
+            max-width: 500px;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+            margin: auto;
+        }
+        h2 {
+            color: #333;
+        }
+        input, select, textarea, button {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+        button {
+            background-color: #28a745;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        .status {
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        .loading {
+            display: none;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Send SMS</h2>
+
+        <h3>Single Contact</h3>
+        <input type="text" id="single_phone" placeholder="Enter phone number">
+        <textarea id="single_message" placeholder="Enter your message"></textarea>
+        <button onclick="sendSingleSMS()">Send SMS</button>
+        <span class="loading" id="single_loading">⏳ Sending...</span>
+        <p class="status" id="single_status"></p>
+
+        <hr>
+
+        <h3>Send to Department</h3>
+        <select id="department">
+            <option value="">Select Department</option>
+            <option value="IT">IT</option>
+            <option value="HR">HR</option>
+            <option value="Finance">Finance</option>
+        </select>
+        <textarea id="group_message" placeholder="Enter your message"></textarea>
+        <button onclick="sendGroupSMS()">Send to Department</button>
+        <span class="loading" id="group_loading">⏳ Sending...</span>
+        <p class="status" id="group_status"></p>
+    </div>
+
+    <script>
+        function sendSingleSMS() {
+            let phone = $("#single_phone").val().trim();
+            let message = $("#single_message").val().trim();
+
+            if (!phone || !message) {
+                $("#single_status").text("⚠️ Please enter phone number and message.");
+                return;
+            }
+
+            $("#single_loading").show();
+            $("#single_status").text("");
+
+            $.ajax({
+                url: "/send-sms",
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ phone_number: phone, message: message }),
+                success: function(response) {
+                    $("#single_status").text("✅ SMS Sent Successfully!");
+                },
+                error: function(xhr) {
+                    let errorMessage = xhr.responseJSON?.error || "❌ Failed to send SMS.";
+                    $("#single_status").text(errorMessage);
+                },
+                complete: function() {
+                    $("#single_loading").hide();
+                }
+            });
+        }
+
+        function sendGroupSMS() {
+            let department = $("#department").val();
+            let message = $("#group_message").val().trim();
+
+            if (!department || !message) {
+                $("#group_status").text("⚠️ Please select a department and enter a message.");
+                return;
+            }
+
+            $("#group_loading").show();
+            $("#group_status").text("");
+
+            $.ajax({
+                url: "/send-sms-group",
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ department: department, message: message }),
+                success: function(response) {
+                    $("#group_status").text("✅ SMS Sent to Department Successfully!");
+                },
+                error: function(xhr) {
+                    let errorMessage = xhr.responseJSON?.error || "❌ Failed to send SMS.";
+                    $("#group_status").text(errorMessage);
+                },
+                complete: function() {
+                    $("#group_loading").hide();
+                }
+            });
+        }
+    </script>
+</body>
+</html>
