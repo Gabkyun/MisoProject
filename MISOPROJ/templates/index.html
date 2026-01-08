@@ -1,140 +1,138 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SMS Sender</title>
+    <title>Miso Messenger</title>
+    <link rel="stylesheet" href="/static/styles.css">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f4;
-            text-align: center;
-            padding: 20px;
-        }
-        .container {
-            max-width: 500px;
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
-            margin: auto;
-        }
-        h2 {
-            color: #333;
-        }
-        input, select, textarea, button {
-            width: 100%;
-            padding: 10px;
-            margin-top: 10px;
-            border-radius: 5px;
-            border: 1px solid #ccc;
-        }
-        button {
-            background-color: #28a745;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #218838;
-        }
-        .status {
-            margin-top: 10px;
-            font-weight: bold;
-        }
-        .loading {
-            display: none;
-            font-size: 18px;
-        }
-    </style>
+    <script src="/static/script.js" defer></script>
 </head>
+
 <body>
-    <div class="container">
-        <h2>Send SMS</h2>
 
-        <h3>Single Contact</h3>
-        <input type="text" id="single_phone" placeholder="Enter phone number">
-        <textarea id="single_message" placeholder="Enter your message"></textarea>
-        <button onclick="sendSingleSMS()">Send SMS</button>
-        <span class="loading" id="single_loading">⏳ Sending...</span>
-        <p class="status" id="single_status"></p>
+    <div id="app">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>Chats</h2>
+                <div class="sidebar-actions">
+                    <button onclick="openGroupModal()" title="Department Broadcast">📢</button>
+                    <button onclick="openAddContact()" title="New Contact">➕</button>
+                </div>
+            </div>
+            <div class="search-box">
+                <input type="text" id="search-input" placeholder="Search contacts...">
+            </div>
+            <div class="contact-list" id="contact-list">
+                <!-- Contacts injected here -->
+            </div>
+        </div>
 
-        <hr>
+        <!-- Main Chat Area -->
+        <div class="chat-area">
+            <!-- Placeholder View -->
+            <!-- Placeholder View (Now Quick Send) -->
+            <div class="chat-placeholder" id="chat-placeholder">
+                <div style="width: 100%; max-width: 400px; padding: 20px; text-align: center;">
+                    <h3 style="margin-bottom: 20px; color: #333;">Quick Message</h3>
 
-        <h3>Send to Department</h3>
-        <select id="department">
-            <option value="">Select Department</option>
-            <option value="IT">IT</option>
-            <option value="HR">HR</option>
-            <option value="Finance">Finance</option>
-        </select>
-        <textarea id="group_message" placeholder="Enter your message"></textarea>
-        <button onclick="sendGroupSMS()">Send to Department</button>
-        <span class="loading" id="group_loading">⏳ Sending...</span>
-        <p class="status" id="group_status"></p>
+                    <div class="form-group">
+                        <input type="text" id="quick-phone" placeholder="Enter Mobile Number"
+                            style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; margin-bottom: 10px;">
+                    </div>
+
+                    <div class="form-group">
+                        <textarea id="quick-message" placeholder="Type a message..."
+                            style="width: 100%; height: 100px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; resize: none; margin-bottom: 15px;"></textarea>
+                    </div>
+
+                    <button onclick="sendDirectMessage()"
+                        style="width: 100%; padding: 12px; background: #0084ff; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer;">
+                        Send Now
+                    </button>
+                </div>
+            </div>
+
+            <!-- Active Chat Interface -->
+            <div id="chat-interface" style="display: none; flex-direction: column; height: 100%;">
+                <div class="chat-header">
+                    <div class="chat-header-info">
+                        <h3 id="chat-name">Select Contact</h3>
+                        <span id="chat-details">...</span>
+                    </div>
+                </div>
+
+                <div class="messages-container" id="messages-container">
+                    <!-- Messages injected here -->
+                </div>
+
+                <div class="input-area">
+                    <textarea id="message-input" placeholder="Type a message..."></textarea>
+                    <button class="send-btn" id="send-btn">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <script>
-        function sendSingleSMS() {
-            let phone = $("#single_phone").val().trim();
-            let message = $("#single_message").val().trim();
+    <!-- Add Contact Modal -->
+    <div class="modal" id="contact-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add New Contact</h3>
+                <span class="close-modal" onclick="closeAddContact()">&times;</span>
+            </div>
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="new-name" placeholder="John Doe">
+            </div>
+            <div class="form-group">
+                <label>Phone Number</label>
+                <input type="text" id="new-phone" placeholder="+639...">
+            </div>
+            <div class="form-group">
+                <label>Department</label>
+                <select id="new-dept">
+                    <option value="IT">IT</option>
+                    <option value="HR">HR</option>
+                    <option value="Finance">Finance</option>
+                    <option value="Operations">Operations</option>
+                </select>
+            </div>
+            <button class="form-btn" onclick="saveContact()">Save Contact</button>
+        </div>
+    </div>
 
-            if (!phone || !message) {
-                $("#single_status").text("⚠️ Please enter phone number and message.");
-                return;
-            }
+    <!-- Group Message Modal -->
+    <div class="modal" id="group-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Department Broadcast</h3>
+                <span class="close-modal" onclick="closeGroupModal()">&times;</span>
+            </div>
+            <div class="form-group">
+                <label>Select Department</label>
+                <select id="group-dept">
+                    <option value="IT">IT</option>
+                    <option value="HR">HR</option>
+                    <option value="Finance">Finance</option>
+                    <option value="Operations">Operations</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Message</label>
+                <textarea id="group-msg"
+                    style="width:100%; height:80px; padding:10px; border-radius:6px; border:1px solid #ddd;"></textarea>
+            </div>
+            <button class="form-btn" onclick="sendGroup()">Send Broadcast</button>
+        </div>
+    </div>
 
-            $("#single_loading").show();
-            $("#single_status").text("");
-
-            $.ajax({
-                url: "/send-sms",
-                type: "POST",
-                contentType: "application/json",
-                data: JSON.stringify({ phone_number: phone, message: message }),
-                success: function(response) {
-                    $("#single_status").text("✅ SMS Sent Successfully!");
-                },
-                error: function(xhr) {
-                    let errorMessage = xhr.responseJSON?.error || "❌ Failed to send SMS.";
-                    $("#single_status").text(errorMessage);
-                },
-                complete: function() {
-                    $("#single_loading").hide();
-                }
-            });
-        }
-
-        function sendGroupSMS() {
-            let department = $("#department").val();
-            let message = $("#group_message").val().trim();
-
-            if (!department || !message) {
-                $("#group_status").text("⚠️ Please select a department and enter a message.");
-                return;
-            }
-
-            $("#group_loading").show();
-            $("#group_status").text("");
-
-            $.ajax({
-                url: "/send-sms-group",
-                type: "POST",
-                contentType: "application/json",
-                data: JSON.stringify({ department: department, message: message }),
-                success: function(response) {
-                    $("#group_status").text("✅ SMS Sent to Department Successfully!");
-                },
-                error: function(xhr) {
-                    let errorMessage = xhr.responseJSON?.error || "❌ Failed to send SMS.";
-                    $("#group_status").text(errorMessage);
-                },
-                complete: function() {
-                    $("#group_loading").hide();
-                }
-            });
-        }
-    </script>
 </body>
+
 </html>

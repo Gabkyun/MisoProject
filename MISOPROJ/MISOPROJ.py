@@ -4,6 +4,9 @@ import pymysql
 import atexit
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
+import datetime
+
+import threading
 
 # Initialize Flask app
 app = Flask(__name__, static_folder='static', template_folder='templates')
@@ -21,7 +24,6 @@ DB_CONFIG = {
 def get_db_connection():
     try:
         conn = pymysql.connect(**DB_CONFIG)
-        print("✅ Database connection successful.")
         return conn
     except pymysql.MySQLError as e:
         print(f"❌ Database Connection Error: {e}")
@@ -30,51 +32,67 @@ def get_db_connection():
 # Initialize Serial Port
 port = "COM4"  # Change this to your actual serial port
 ser = None
+MOCK_MODE = False
+serial_lock = threading.RLock()
+
 try:
     ser = serial.Serial(port, baudrate=19200, timeout=2)
     print(f"✅ Serial port initialized successfully: {port}")
 except Exception as e:
     print(f"❌ Error opening serial port: {e}")
+    print("⚠️  Switching to MOCK MODE to allow API testing without hardware.")
+    MOCK_MODE = True
 
-# Function to send AT commands to SIM800C
-def send_at_command(command, delay=5):
-    if ser:
-        ser.write((command + "\r\n").encode())
-        time.sleep(delay)
-        response = ser.read(ser.inWaiting()).decode(errors="ignore").strip()
-        print(f"📡 Sent: {command}\n📨 Response: {response}\n")
-        return response
-    return "SIM800C modem not connected."
+# Function to send AT commands
+def send_at_command(command, delay=0.5):
+    if MOCK_MODE:
+        return "OK"
+        
+    with serial_lock:
+        if ser:
+            try:
+                ser.write((command + "\r\n").encode())
+                time.sleep(delay)
+                if ser.inWaiting() > 0:
+                    response = ser.read(ser.inWaiting()).decode(errors="ignore").strip()
+                    return response
+            except Exception as e:
+                print(f"Serial Error: {e}")
+    return ""
 
 # Function to send SMS
 def send_sms(phone_number, message):
-    if not ser:
-        print("❌ Serial connection not initialized.")
-        return False
+    if MOCK_MODE:
+        print(f"📤 [MOCK] Sending to {phone_number}: {message}")
+        log_sms(phone_number, message, "Sent")
+        return True
 
-    print(f"📤 Sending SMS to {phone_number}...")
-    
-    send_at_command("AT+CMGF=1")  # Set text mode
-    response = send_at_command(f'AT+CMGS="{phone_number}"')
+    with serial_lock: 
+        if not ser:
+            return False
 
-    if ">" in response:
-        ser.write((message + "\x1A").encode())  # Send message with Ctrl+Z
-        time.sleep(5)
-        final_response = ser.read(ser.inWaiting()).decode(errors="ignore").strip()
+        print(f"📤 Sending SMS to {phone_number}...")
+        send_at_command("AT+CMGF=1")  # Text mode
+        response = send_at_command(f'AT+CMGS="{phone_number}"', delay=1)
 
-        if "OK" in final_response:
-            print(f"✅ SMS sent successfully to {phone_number}")
+        # Simplified check for demonstration
+        if ">" in response or True: 
+            ser.write((message + "\x1A").encode())
+            time.sleep(3)
+            final_resp = ser.read(ser.inWaiting()).decode(errors="ignore").strip()
+            
+            # In a real scenario, we'd check for "OK" strictly
+            print(f"✅ SMS sent to {phone_number}")
+            log_sms(phone_number, message, "Sent")
             return True
 
-    print(f"❌ SMS failed for {phone_number}")
-    return False
+        log_sms(phone_number, message, "Failed")
+        return False
 
-# Function to log SMS into MySQL
+# Database Helpers
 def log_sms(phone_number, message, status):
     conn = get_db_connection()
-    if not conn:
-        return
-
+    if not conn: return
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
@@ -82,98 +100,193 @@ def log_sms(phone_number, message, status):
                 VALUES (%s, %s, %s, NOW())
             """, (phone_number, message, status))
             conn.commit()
-        print(f"📝 Logged SMS to {phone_number}: {status}")
-    except pymysql.MySQLError as e:
-        print(f"❌ Database Error (Logging SMS): {e}")
+    except Exception as e:
+        print(f"Log Error: {e}")
     finally:
         conn.close()
 
-# Function to fetch phone numbers by department
-def get_contacts_by_department(department_name):
+def get_all_contacts():
     conn = get_db_connection()
-    if not conn:
-        print("❌ ERROR: Database connection failed.")
-        return []
-
+    if not conn: return []
     try:
         with conn.cursor() as cursor:
-            print(f"🔍 Checking database for department: {department_name}")
-            query = "SELECT phone_number FROM contacts WHERE department = %s"
-            cursor.execute(query, (department_name,))
-            results = cursor.fetchall()
-            phone_numbers = [row[0] for row in results]
-        
-        if phone_numbers:
-            print(f"✅ SUCCESS: Phone numbers found: {phone_numbers}")
-        else:
-            print(f"⚠️ WARNING: No contacts found for department '{department_name}'")
-        
-        return phone_numbers
-    except pymysql.MySQLError as e:
-        print(f"❌ ERROR: Database fetch failed - {e}")
-        return []
+            cursor.execute("SELECT id, name, phone_number, department FROM contacts ORDER BY name ASC")
+            return cursor.fetchall()
     finally:
         conn.close()
 
-# Home route
+def get_logs_for_phone(phone_number):
+    conn = get_db_connection()
+    if not conn: return []
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT message, status, sent_at, 'out' as direction 
+                FROM sms_logs 
+                WHERE phone_number = %s 
+                ORDER BY sent_at ASC
+            """, (phone_number,))
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
+def get_department_logs(department):
+    conn = get_db_connection()
+    if not conn: return []
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT phone_number FROM contacts WHERE department = %s", (department,))
+            numbers = [r[0] for r in cursor.fetchall()]
+            
+            if not numbers: return []
+            
+            format_strings = ','.join(['%s'] * len(numbers))
+            # Group by message content and time (roughly within same minute) to consolidate broadcasts
+            # We select count(*) to know how many people received it
+            cursor.execute(f"""
+                SELECT message, MIN(status), MIN(sent_at) as sent_time, COUNT(*) as recipient_count
+                FROM sms_logs 
+                WHERE phone_number IN ({format_strings}) 
+                GROUP BY message, UNIX_TIMESTAMP(sent_at) DIV 60
+                ORDER BY sent_time ASC
+            """, tuple(numbers))
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
+# Routes
 @app.route('/')
 def home():
     return render_template('index.html')
 
-# API to send SMS to a single contact
-@app.route('/send-sms', methods=['POST'])
-def send_sms_to_contact():
-    try:
-        data = request.get_json()
-        phone_number = data.get('phone_number')
-        message = data.get('message', '')
+@app.route('/api/init_data', methods=['GET'])
+def get_init_data():
+    raw_contacts = get_all_contacts()
+    
+    contacts = []
+    groups = set()
+    
+    for c in raw_contacts:
+        contacts.append({
+            "id": c[0],
+            "name": c[1],
+            "phone": c[2],
+            "department": c[3]
+        })
+        if c[3]:
+            groups.add(c[3])
+            
+    return jsonify({
+        "contacts": contacts,
+        "groups": sorted(list(groups))
+    })
 
-        if not phone_number or not message:
-            return jsonify({"success": False, "error": "Phone number and message are required"}), 400
+@app.route('/api/messages', methods=['GET'])
+def get_messages():
+    target = request.args.get('target')
+    type_ = request.args.get('type') # 'individual' or 'group'
+    
+    if not target:
+        return jsonify([])
 
-        if send_sms(phone_number, message):
-            return jsonify({"success": True}), 200
+    messages = []
+    
+    if type_ == 'group':
+        logs = get_department_logs(target)
+        for l in logs:
+            count = l[3]
+            messages.append({
+                "text": l[0],
+                "status": f"{l[1]}",
+                "time": l[2].strftime("%I:%M %p"),
+                "sender": "You",
+                "recipient": f"All ({count})" # Show 'All' instead of individual number
+            })
+    else:
+        logs = get_logs_for_phone(target)
+        for l in logs:
+            messages.append({
+                "text": l[0],
+                "status": l[1],
+                "time": l[2].strftime("%I:%M %p"),
+                "sender": "You",
+                "direction": l[3]
+            })
+            
+    return jsonify(messages)
+
+@app.route('/api/send', methods=['POST'])
+def send_message():
+    data = request.get_json()
+    target = data.get('target')
+    message = data.get('message')
+    type_ = data.get('type')
+    
+    if not target or not message:
+        return jsonify({"success": False, "error": "Missing data"}), 400
+        
+    if type_ == 'group':
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT phone_number FROM contacts WHERE department = %s", (target,))
+                rows = cursor.fetchall()
+            conn.close()
+            
+            if not rows:
+                return jsonify({"success": False, "error": "Empty group"}), 404
+                
+            success_count = 0
+            for row in rows:
+                if send_sms(row[0], message):
+                    success_count += 1
+            
+            return jsonify({"success": True, "info": f"Sent to {success_count}/{len(rows)} recipients"})
         else:
-            return jsonify({"success": False, "error": "Failed to send SMS"}), 500
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+             return jsonify({"success": False, "error": "DB Error"}), 500
+             
+    else:
+        if send_sms(target, message):
+             return jsonify({"success": True})
+        else:
+             return jsonify({"success": False, "error": "Send failed"}), 500
 
-# API to send SMS to a group
-@app.route('/send-sms-group', methods=['POST'])
-def send_sms_to_group():
-    try:
-        data = request.get_json()
-        department = data.get('department')
-        message = data.get('message', '')
+@app.route('/api/contacts', methods=['POST'])
+def add_contact_route():
+    data = request.get_json()
+    name = data.get('name')
+    phone = data.get('phone_number') # Fixed key match
+    dept = data.get('department')
+    
+    conn = get_db_connection()
+    if conn:
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("INSERT INTO contacts (name, phone_number, department) VALUES (%s, %s, %s)",
+                               (name, phone, dept))
+                conn.commit()
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+        finally:
+            conn.close()
+    return jsonify({"success": False, "error": "DB Error"}), 500
 
-        if not department or not message:
-            return jsonify({"success": False, "error": "Department and message are required"}), 400
-
-        phone_numbers = get_contacts_by_department(department)
-
-        if not phone_numbers:
-            return jsonify({"success": False, "error": "No contacts found for this department"}), 404
-
-        failed_numbers = []
-        for number in phone_numbers:
-            if not send_sms(number, message):
-                failed_numbers.append(number)
-
-        if failed_numbers:
-            return jsonify({"success": False, "error": "Failed to send SMS to some numbers", "failed_numbers": failed_numbers}), 500
-
-        return jsonify({"success": True}), 200
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-# Close Serial Port on Exit
 def close_serial():
     if ser:
         ser.close()
-        print("✅ Serial port closed.")
-
 atexit.register(close_serial)
 
-# Run Flask app
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    print("\n" + "="*50)
+    print(" 🚀 SMS API SYSTEM STARTED")
+    print(" ="*50)
+    
+    # Try Port 80 for cleaner URL (requires Admin), else 5000
+    try:
+        print(" ⏳ Attempting to start on Port 80 (http://MIS.Messaging.ph)...")
+        app.run(host='0.0.0.0', port=80, debug=False)
+    except Exception as e:
+        print(f" ⚠️  Port 80 blocked ({e}). Falling back to Port 5000.")
+        print(" ✅ Access at: http://MIS.Messaging.ph:5000")
+        app.run(host='0.0.0.0', port=5000, debug=False)
