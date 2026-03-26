@@ -1,25 +1,31 @@
 $domain = "MIS.Messaging.ph"
-$ip = "127.0.0.1"
+$ip = "192.168.20.10"
 $hostsPath = "$env:windir\System32\drivers\etc\hosts"
 
-# Check if running as Administrator
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "⚠️  Please run this script as Administrator to update the hosts file." -ForegroundColor Yellow
+    Write-Host " [ERROR] PLEASE RUN AS ADMINISTRATOR " -ForegroundColor Red
+    Pause
     exit
 }
 
-# Read existing hosts file
+Write-Host "Stage 1: Domain Setup..."
 $content = Get-Content $hostsPath -Raw
-
 if ($content -match $domain) {
-    Write-Host "✅ Domain $domain is already configured in hosts file." -ForegroundColor Green
-} else {
-    try {
-        Add-Content -Path $hostsPath -Value "`r`n$ip       $domain"
-        Write-Host "✅ Successfully added $domain pointing to $ip" -ForegroundColor Green
-        Write-Host "👉 You can now access the API at http://$domain (port 80 or 5000)" -ForegroundColor Cyan
-    } catch {
-        Write-Error "Failed to write to hosts file. Check permissions."
-    }
+    $content = $content -replace ".*$domain.*`r?`n?", ""
+    Set-Content -Path $hostsPath -Value $content
 }
+Add-Content -Path $hostsPath -Value "`r`n$ip       $domain"
+
+Write-Host "Stage 2: Firewall Setup..."
+Remove-NetFirewallRule -DisplayName "SMS_System_Port_80" -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "SMS_System_Port_80" -Direction Inbound -LocalPort 80 -Protocol TCP -Action Allow -Profile Any | Out-Null
+Remove-NetFirewallRule -DisplayName "SMS_System_Port_5000" -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "SMS_System_Port_5000" -Direction Inbound -LocalPort 5000 -Protocol TCP -Action Allow -Profile Any | Out-Null
+
+Write-Host "------------------------------------------------------------"
+Write-Host " SUCCESS: SETUP COMPLETE" -ForegroundColor Green
+Write-Host " Local URL: http://$domain"
+Write-Host " Network URL: http://$ip:5000"
+Write-Host "------------------------------------------------------------"
+Pause

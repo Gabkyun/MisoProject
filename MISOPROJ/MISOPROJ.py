@@ -8,6 +8,8 @@ import datetime
 
 import threading
 
+import socket
+
 # Initialize Flask app
 app = Flask(__name__, static_folder='static', template_folder='templates')
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -279,14 +281,13 @@ atexit.register(close_serial)
 
 if __name__ == '__main__':
     print("\n" + "="*50)
-    print(" 🚀 SMS API SYSTEM STARTED")
+    print(" 🚀 SMS API SYSTEM - PROXY MODE")
     print(" ="*50)
     
-    # Try Port 80 for cleaner URL (requires Admin), else 5000
-    try:
-        print(" ⏳ Attempting to start on Port 80 (http://MIS.Messaging.ph)...")
-        app.run(host='0.0.0.0', port=80, debug=False)
-    except Exception as e:
-        print(f" ⚠️  Port 80 blocked ({e}). Falling back to Port 5000.")
-        print(" ✅ Access at: http://MIS.Messaging.ph:5000")
-        app.run(host='0.0.0.0', port=5000, debug=False)
+    # We use Port 5000 so Apache can handle Port 80
+    port_to_use = 5000
+    print(" ✅ STATUS: Running on Port 5000")
+    print(" 📱 LOCAL ACCESS:  http://MIS.Messaging.ph")
+    print(" 💻 NETWORK ACCESS: http://192.168.20.10:5000")
+
+    app.run(host='0.0.0.0', port=port_to_use, debug=True)
